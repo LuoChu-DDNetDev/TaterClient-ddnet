@@ -3,7 +3,10 @@
 #include <game/client/gameclient.h>
 
 #include <base/system.h>
+#include <game/generated/protocol.h>
+#include <game/localization.h>
 
+#include "base/log.h"
 #include "mod.h"
 
 class CMod::CIden
@@ -286,10 +289,23 @@ void CMod::OnConsoleInit()
 			if(pResult->GetString(i)[0] != '\0')
 				pThis->Kill(CIden(pThis, pResult->GetString(i), CIden::EParseMode::NAME), true);
 	});
+
+	Console()->Chain("+fire", [](IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData) {
+		pfnCallback(pResult, pCallbackUserData);
+		if(pResult->GetInteger(0) == 1)
+			((CMod *)pUserData)->OnFire();
+	}, this);
 }
 
 void CMod::OnRender()
 {
+	// If haven't reshot someone in last 5 seconds, cancel shot
+	if(Client()->State() != IClient::STATE_ONLINE && m_LastShotClientId != -1 && time() - m_LastShotTime > (int64_t)5e9)
+	{
+		m_LastShotClientId = -1;
+		GameClient()->Echo(TCLocalize("Cancelling shot"));
+	}
+
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 		return;
 
@@ -351,4 +367,102 @@ void CMod::OnRender()
 			}
 		}
 	}
+}
+
+void CMod::OnStateChange(int OldState, int NewState)
+{
+	m_LastShotClientId = -1;
+}
+
+void CMod::OnFire()
+{
+	auto FGetBestClient = [&]() -> const CGameClient::CClientData * {
+		if(Client()->State() != IClient::STATE_ONLINE)
+			return nullptr;
+		if(g_Config.m_ClModWeapon == -1)
+			return nullptr;
+		if(!Client()->RconAuthed())
+			return nullptr;
+		if(GameClient()->m_aLocalIds[g_Config.m_ClDummy] < 0)
+			return nullptr;
+		const auto &Player = GameClient()->m_aClients[GameClient()->m_aLocalIds[g_Config.m_ClDummy]];
+		if(!Player.m_Active)
+			return nullptr;
+		if(Player.m_Team == TEAM_SPECTATORS)
+			return nullptr;
+		if(Player.m_RenderPrev.m_Weapon != g_Config.m_ClModWeapon)
+			return nullptr;
+		const vec2 Pos = Player.m_RenderPos;
+		const vec2 Angle = normalize(GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy]);
+		// Find person who we have shot
+		const CGameClient::CClientData *pBestClient = nullptr;
+		float BestClientScore = -INFINITY;
+		for(const CGameClient::CClientData &Other : GameClient()->m_aClients)
+		{
+			if(!Other.m_Active || Player.ClientId() == Other.ClientId() || GameClient()->IsOtherTeam(Other.ClientId()))
+				continue;
+			const float PosDelta = distance(Other.m_RenderPos, Pos);
+			const float MaxRange = (g_Config.m_ClModWeapon == 0 ? 100.0f : 750.0f);
+			log_debug("Mod", "%d: pos delta %f/%f\n", Other.ClientId(), PosDelta, MaxRange);
+			if(PosDelta > MaxRange)
+				continue;
+			const float AngleDelta = dot(normalize(Other.m_RenderPos - Pos), Angle);
+			log_debug("Mod", "%d: angle delta %f\n", Other.ClientId(), AngleDelta);
+			if(AngleDelta < 0.7f)
+				continue;
+			const float Score = (1.0f - AngleDelta) * 5.0f + (MaxRange - PosDelta) * 0.01f;
+			if(Score > BestClientScore)
+			{
+				BestClientScore = Score;
+				pBestClient = &Other;
+			}
+		}
+		return pBestClient;
+	};
+
+	const CGameClient::CClientData *pBestClient = FGetBestClient();
+	char aBuf[256];
+	if(!pBestClient)
+	{
+		if(m_LastShotClientId != -1)
+			GameClient()->Echo(TCLocalize("Cancelling shot"));
+		return;
+	}
+	if(pBestClient->ClientId() != m_LastShotClientId)
+	{
+		str_format(aBuf, sizeof(aBuf), TCLocalize("Shot %d: %s, shoot again to run command"), pBestClient->ClientId(), pBestClient->m_aName);
+		GameClient()->Echo(aBuf);
+		m_LastShotClientId = pBestClient->ClientId();
+		m_LastShotTime = time();
+		return;
+	}
+	str_format(aBuf, sizeof(aBuf), TCLocalize("Shot %d: %s, running command"), pBestClient->ClientId(), pBestClient->m_aName);
+	GameClient()->Echo(aBuf);
+	m_LastShotClientId = -1;
+	class CResultModFire : public CConsole::IResult
+	{
+	public:
+		const char *m_pBuf;
+		CResultModFire(const char *pBuf) : IResult(0), m_pBuf(pBuf) {}
+		int NumArguments() const
+		{
+			return 1;
+		}
+		const char *GetString(unsigned Index) const override
+		{
+			if(Index == 0)
+				return m_pBuf;
+			return "";
+		}
+		int GetInteger(unsigned Index) const override { return 0; };
+		float GetFloat(unsigned Index) const override { return 0.0f; };
+		std::optional<ColorHSLA> GetColor(unsigned Index, float DarkestLighting) const override { return std::nullopt; };
+		void RemoveArgument(unsigned Index) override {};
+		int GetVictim() const override { return -1; };
+	};
+	str_format(aBuf, sizeof(aBuf), "%d", pBestClient->ClientId());
+	CResultModFire ResultModFire(aBuf);
+	GameClient()->m_Conditional.m_pResult = &ResultModFire;
+	Console()->ExecuteLine(g_Config.m_ClModWeaponCommand);
+	GameClient()->m_Conditional.m_pResult = nullptr;
 }

@@ -20,9 +20,14 @@ public:
 	void Ban(const CIden &Iden, const char *pTime, const char *pReason);
 	void Mute(const CIden &Iden, const char *pTime, const char *pReason);
 
+	int m_LastShotClientId = -1;
+	int64_t m_LastShotTime = -1;
+	void OnFire();
+
 	int Sizeof() const override { return sizeof(*this); }
 	void OnConsoleInit() override;
 	void OnRender() override;
+	void OnStateChange(int OldState, int NewState) override;
 };
 
 #endif

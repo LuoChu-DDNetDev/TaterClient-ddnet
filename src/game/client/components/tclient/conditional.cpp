@@ -47,7 +47,7 @@ int CConditional::ParseValue(char *pBuf, int Length)
 			int Index;
 			if(str_toint(pBuf, &Index))
 			{
-				if(Index >= 0 && Index < m_pResult->NumArguments())
+				if(Index >= 0)
 					return str_copy(pBuf, m_pResult->GetString(Index), Length);
 				else
 					return str_copy(pBuf, "", Length);
@@ -62,16 +62,16 @@ int CConditional::ParseValue(char *pBuf, int Length)
 
 void CConditional::ParseString(char *pBuf, int Length)
 {
-	// May give incorrect values on buffer overflow
 	if(!pBuf || Length <= 0)
 		return;
-
-	std::vector<std::pair<int, int>> vParsedRanges;
-	const auto IsInParsedRegion = [&vParsedRanges](int Pos) {
-		return std::any_of(vParsedRanges.begin(), vParsedRanges.end(), [Pos](const auto &ParsedRange) {
-			return Pos >= ParsedRange.first && Pos < ParsedRange.second;
-		});
-	};
+	bool HasBrackets = false;
+	for(const char *p = pBuf; *p != '\0'; ++p)
+		if(*p == '{' || *p == '}')
+			HasBrackets = true;
+	if(!HasBrackets)
+		return;
+	
+	// May give malformed result on buffer overflow
 
 	int Len = strnlen(pBuf, Length);
 	while(true)
@@ -82,11 +82,19 @@ void CConditional::ParseString(char *pBuf, int Length)
 		// Find the innermost {...} not inside any parsed range
 		for(int i = 0; i < Len; ++i)
 		{
-			if(pBuf[i] == '{' && !IsInParsedRegion(i))
+			if(pBuf[i] != '{' && pBuf[i] != '}')
+				continue;
+			// Count number of backslashes before this character
+			int BackslashCount = 0;
+			for (int j = i - 1; j >= 0 && pBuf[j] == '\\'; --j)
+				BackslashCount++;
+			if(BackslashCount % 2 != 0)
+				continue;
+			if (pBuf[i] == '{')
 			{
 				LastOpen = i;
 			}
-			else if(pBuf[i] == '}' && LastOpen != -1 && !IsInParsedRegion(i))
+			else if (pBuf[i] == '}' && LastOpen != -1)
 			{
 				ClosePos = i;
 				break;
@@ -106,44 +114,76 @@ void CConditional::ParseString(char *pBuf, int Length)
 		int ResultLen = ParseValue(aTemp, sizeof(aTemp));
 		if(ResultLen == -1)
 		{
-			ResultLen = CopyLen;
+			if(Len + 2 >= Length)
+				break; // Not enough space; stop
+			mem_move(pBuf + ClosePos + 1, pBuf + ClosePos, Len - ClosePos + 1);
+			pBuf[ClosePos] = '\\';
+			Len++;
+			mem_move(pBuf + LastOpen + 1, pBuf + LastOpen, Len - LastOpen + 1);
+			pBuf[LastOpen] = '\\';
+			Len++;
 		}
 		else
 		{
-			int TailLen = Len - ClosePos - 1;
-			int NewLen = LastOpen + ResultLen + TailLen;
+			for(const char *p = aTemp; *p != '\0'; ++p)
+				if(*p == '{' || *p == '}' || *p == '\\')
+					ResultLen++;
+			mem_move(pBuf + LastOpen + ResultLen, pBuf + ClosePos + 1, Len - ClosePos);
+			EscapeString(aTemp, pBuf + LastOpen, Length - LastOpen);
+			Len -= ClosePos - LastOpen + 1;
+			Len += ResultLen;
+			pBuf[Len] = '\0';
+		}
+	}
+	UnescapeString(pBuf, Length);
+}
 
-			if(NewLen >= Length)
-			{
-				ResultLen = Length - 1 - LastOpen - TailLen;
-				if(ResultLen < 0)
-					ResultLen = 0;
-				NewLen = LastOpen + ResultLen + TailLen;
-			}
+int CConditional::EscapeString(char *pIn, char *pBuf, int Length)
+{
+	int WriteIndex = 0;
+	for (int i = 0; pIn[i] != '\0'; ++i)
+	{
+		char c = pIn[i];
 
-			// Move tail forward/backward
-			mem_move(pBuf + LastOpen + ResultLen, pBuf + ClosePos + 1, TailLen);
-			pBuf[NewLen] = '\0';
-
-			// Copy result
-			mem_copy(pBuf + LastOpen, aTemp, ResultLen);
-			Len = NewLen;
-
-			// Shift existing ranges after ClosePos
-			for(auto &ParsedRange : vParsedRanges)
-			{
-				if(ParsedRange.first > ClosePos)
-				{
-					int Delta = ResultLen - (ClosePos + 1 - LastOpen);
-					ParsedRange.first += Delta;
-					ParsedRange.second += Delta;
-				}
-			}
+		// If we need to write an escape character and the actual character
+		if((c == '{' || c == '}' || c == '\\'))
+		{
+			if(WriteIndex + 2 >= Length)
+				break; // not enough room for escape + char + null
+			pBuf[WriteIndex++] = '\\';
+		}
+		else
+		{
+			if(WriteIndex + 1 >= Length)
+				break; // not enough room for char + null
 		}
 
-		// Add this region to parsed ranges
-		vParsedRanges.emplace_back(LastOpen, LastOpen + ResultLen);
+		pBuf[WriteIndex++] = c;
 	}
+	return WriteIndex;
+}
+
+void CConditional::UnescapeString(char *pString, int Length)
+{
+	int WritePos = 0; // Position to write the unescaped char
+	for (int ReadPos = 0; ReadPos < Length; ReadPos++)
+	{
+		if (pString[ReadPos] == '\\' && ReadPos + 1 < Length)
+		{
+			char NextChar = pString[ReadPos + 1];
+			if (NextChar == '\\' || NextChar == '{' || NextChar == '}')
+			{
+				// Replace the escape sequence by the actual character
+				pString[WritePos++] = NextChar;
+				ReadPos++; // Skip the escaped character
+				continue;
+			}
+		}
+		// Normal character, copy as-is
+		pString[WritePos++] = pString[ReadPos];
+	}
+	// Null-terminate the resulting string
+	pString[WritePos] = '\0';
 }
 
 void CConditional::ConIfeq(IConsole::IResult *pResult, void *pUserData)
@@ -230,12 +270,6 @@ static int TimeFromStr(const char *pStr, char OutUnit)
 
 void CConditional::OnConsoleInit()
 {
-	m_vVariables.emplace_back("l", [&](char *pOut, int Length) {
-		return str_copy(pOut, "{", Length);
-	});
-	m_vVariables.emplace_back("r", [&](char *pOut, int Length) {
-		return str_copy(pOut, "}", Length);
-	});
 	m_vVariables.emplace_back("game_mode", [&](char *pOut, int Length) {
 		return str_copy(pOut, GameClient()->m_GameInfo.m_aGameType, Length);
 	});

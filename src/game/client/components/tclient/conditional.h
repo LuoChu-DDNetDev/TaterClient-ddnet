@@ -20,6 +20,9 @@ public:
 	const IConsole::IResult *m_pResult = nullptr;
 
 	void ParseString(char *pBuf, int Length);
+	static int EscapeString(char *pIn, char *pBuf, int Length);
+	static void UnescapeString(char *pString, int Length); // Inplace
+
 	static void ConIfeq(IConsole::IResult *pResult, void *pUserData);
 	static void ConIfneq(IConsole::IResult *pResult, void *pUserData);
 	static void ConIfreq(IConsole::IResult *pResult, void *pUserData);

@@ -13,17 +13,17 @@ def hash_file(filename):
 		return hash_bytes(f.read())
 
 def main():
-	p = argparse.ArgumentParser(description="Checksums source files")
-	p.add_argument("list_file", metavar="LIST_FILE", help="File listing all the files to hash")
-	p.add_argument("extra_file", metavar="EXTRA_FILE", help="File containing extra strings to be hashed")
-	args = p.parse_args()
+	# p = argparse.ArgumentParser(description="Checksums source files")
+	# p.add_argument("list_file", metavar="LIST_FILE", help="File listing all the files to hash")
+	# p.add_argument("extra_file", metavar="EXTRA_FILE", help="File containing extra strings to be hashed")
+	# args = p.parse_args()
 
-	with open(args.list_file, encoding="utf-8") as f:
-		files = f.read().splitlines()
-	with open(args.extra_file, "rb") as f:
-		extra = f.read().splitlines()
-	hashes_files = [hash_file(file) for file in files]
-	hashes_extra = [hash_bytes(line) for line in extra]
+	# with open(args.list_file, encoding="utf-8") as f:
+	# 	files = f.read().splitlines()
+	# with open(args.extra_file, "rb") as f:
+	# 	extra = f.read().splitlines()
+	hashes_files = [0]  # [hash_file(file) for file in files]
+	hashes_extra = [0]  # [hash_bytes(line) for line in extra]
 	hashes = hashes_files + hashes_extra
 	print("""\
 #include <engine/client/checksum.h>
