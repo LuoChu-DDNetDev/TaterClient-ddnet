@@ -15,6 +15,8 @@
 #include <engine/shared/config.h>
 #include <engine/shared/json.h>
 
+#include <generated/client_data.h>
+
 #include "tclient.h"
 
 static constexpr const char *TCLIENT_INFO_URL = "https://update.tclient.app/info.json";
@@ -98,6 +100,12 @@ void CTClient::OnInit()
 	TextRender()->SetCustomFace(g_Config.m_TcCustomFont);
 	m_pGraphics = Kernel()->RequestInterface<IEngineGraphics>();
 	FetchTClientInfo();
+
+	if(!g_pData->m_aImages[IMAGE_BANNER].m_Id.IsValid())
+	{
+		SWarning Warning(TCLocalize("TClient"), TCLocalize("data/tclient/gui_logo.png not detected. You have probably only installed the TClient DDNet.exe which is not supported, please use the entire TClient folder"));
+		Client()->AddWarning(Warning);
+	}
 }
 
 static bool LineShouldHighlight(const char *pLine, const char *pName)
