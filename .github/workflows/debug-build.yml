@@ -1,0 +1,113 @@
+name: Debug Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-asan:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            cc: clang
+            cxx: clang++
+            generator: Ninja
+            cmake-extra: ""
+          - os: macos-latest
+            cc: clang
+            cxx: clang++
+            generator: Ninja
+            cmake-extra: >
+              -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          - os: windows-latest
+            cc: clang-cl
+            cxx: clang-cl
+            generator: Ninja
+            cmake-extra: >
+              -DCMAKE_C_COMPILER=clang-cl
+              -DCMAKE_CXX_COMPILER=clang-cl
+
+    env:
+      CARGO_HTTP_MULTIPLEXING: false
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Prepare Linux
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y \
+          clang llvm \
+          cmake ninja-build pkg-config \
+          libfreetype6-dev libnotify-dev libsdl2-dev libsqlite3-dev \
+          libvulkan-dev glslang-tools spirv-tools \
+          libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
+          libx264-dev libpng-dev libglew-dev
+
+    - name: Prepare macOS
+      if: runner.os == 'macOS'
+      run: |
+        brew update || true
+        brew install pkg-config ninja molten-vk vulkan-headers \
+                     glslang spirv-tools glew libpng x264 || true
+        brew upgrade freetype || true
+
+    - name: Prepare Windows
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        choco install ninja llvm -y
+
+    - name: Setup Rust
+      run: |
+        rustup default stable
+        rustup update
+
+    - name: Cache Rust
+      uses: Swatinem/rust-cache@v2
+
+    - name: Configure & Build (ASAN)
+      shell: bash
+      env:
+        CC: ${{ matrix.cc }}
+        CXX: ${{ matrix.cxx }}
+      run: |
+        mkdir build
+        cd build
+
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          SAN_FLAGS="/fsanitize=address /Zi"
+          cmake .. \
+            -G "${{ matrix.generator }}" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="${SAN_FLAGS}" \
+            -DCMAKE_CXX_FLAGS="${SAN_FLAGS}" \
+            -DDISCORD=ON \
+            -DWEBSOCKETS=OFF \
+            ${{ matrix.cmake-extra }}
+        else
+          SAN_FLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer"
+          cmake .. \
+            -G "${{ matrix.generator }}" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="${SAN_FLAGS}" \
+            -DCMAKE_CXX_FLAGS="${SAN_FLAGS}" \
+            -DDISCORD=ON \
+            -DWEBSOCKETS=OFF \
+            ${{ matrix.cmake-extra }}
+        fi
+
+        cmake --build . --target everything
+
+    - name: Upload ASAN Build
+      uses: actions/upload-artifact@v4
+      with:
+        name: ddnet-debug-${{ runner.os }}
+        path: build
