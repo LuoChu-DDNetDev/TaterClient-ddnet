@@ -106,11 +106,8 @@ jobs:
 
         mkdir release
         cd release
-        cmake -E env ${{ matrix.cmake-init-env }} $ENVFLAGS \
-          cmake ${{ matrix.cmake-args }} $POST_FLAGS \
-          -DDOWNLOAD_GTEST=ON \
-          -DCMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG=. ..
-        cmake --build . --config Debug --target everything
+        ${{ matrix.cmake-path }}cmake -E env ${{ matrix.cmake-init-env }} $ENVFLAGS ${{ matrix.cmake-path }}cmake ${{ matrix.cmake-args }} $POST_FLAGS -DCMAKE_BUILD_TYPE=Debug -DDOWNLOAD_GTEST=ON -DCMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG=. ..
+        ${{ matrix.cmake-path }}cmake --build . --config Debug --target everything
 
     - name: Package
       run: |
