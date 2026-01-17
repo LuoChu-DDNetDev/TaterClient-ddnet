@@ -17,19 +17,19 @@ jobs:
         include:
         - os: ubuntu-22.04
           cmake-args: -G Ninja -DCMAKE_BUILD_TYPE=Debug -DDISCORD=ON -DDISCORD_DYNAMIC=ON -DWEBSOCKETS=OFF -DPREFER_BUNDLED_LIBS=ON -DAUTOUPDATE=ON
-          cmake-init-env: CC=clang CXX=clang++ CFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer" CXXFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer"
+          cmake-init-env: CC=clang CXX=clang++ CFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer" CXXFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer" LDFLAGS="-fsanitize=address,undefined"
           package-file: "*-linux_x86_64.tar.xz"
           fancy: true
 
         - os: macOS-latest
           cmake-args: -G Ninja -DCMAKE_BUILD_TYPE=Debug -DDISCORD=ON -DWEBSOCKETS=OFF -DPREFER_BUNDLED_LIBS=ON -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_SYSTEM_IGNORE_PATH=/usr/lib -DCMAKE_FIND_FRAMEWORK=LAST
-          cmake-init-env: CC=clang CXX=clang++ CFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer" CXXFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer"
+          cmake-init-env: CC=clang CXX=clang++ CFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer" CXXFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer" LDFLAGS="-fsanitize=address,undefined"
           package-file: "*-macos.dmg"
           fancy: false
 
         - os: windows-latest
           cmake-args: -A x64 -DCMAKE_BUILD_TYPE=Debug -DDISCORD=ON -DTOOLS=OFF -DAUTOUPDATE=ON
-          cmake-init-env: CC=clang CXX=clang++ CFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer" CXXFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer"
+          cmake-init-env: CC=clang CXX=clang++ CFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer" CXXFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer" CL=/Zi
           package-file: "*-win64.zip"
           fancy: false
 
