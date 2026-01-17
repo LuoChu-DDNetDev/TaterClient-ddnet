@@ -29,7 +29,7 @@ jobs:
 
         - os: windows-latest
           cmake-args: -A x64 -DCMAKE_BUILD_TYPE=Debug -DDISCORD=ON -DTOOLS=OFF -DAUTOUPDATE=ON
-          cmake-init-env: CC=clang CXX=clang++ CFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer" CXXFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer" CL=/Zi
+          cmake-init-env: CC=clang-cl CXX=clang-cl CFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer" CXXFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer"
           package-file: "*-win64.zip"
           fancy: false
 
