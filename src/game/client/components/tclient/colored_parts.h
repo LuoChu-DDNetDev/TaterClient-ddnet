@@ -17,6 +17,9 @@ public:
 	public:
 		int m_Index;
 		ColorRGBA m_Color;
+
+		CColoredPart(int Index, ColorRGBA Color) :
+			m_Index(Index), m_Color(Color) {}
 	};
 
 private:
