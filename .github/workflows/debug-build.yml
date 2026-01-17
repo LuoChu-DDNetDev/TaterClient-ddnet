@@ -1,38 +1,49 @@
 name: Debug Build
 
 on:
-  workflow_dispatch:
+  push:
+    branches-ignore:
+      - gh-readonly-queue/**
 
 jobs:
-  build-asan:
+  build-cmake:
     runs-on: ${{ matrix.os }}
-
+    env:
+      CARGO_HTTP_MULTIPLEXING: false
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-22.04, macOS-latest, windows-latest]
         include:
-          - os: ubuntu-22.04
-            cc: clang
-            cxx: clang++
-            generator: Ninja
-            cmake-extra: ""
-          - os: macos-latest
-            cc: clang
-            cxx: clang++
-            generator: Ninja
-            cmake-extra: >
-              -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
-              -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
-          - os: windows-latest
-            cc: clang-cl
-            cxx: clang-cl
-            generator: Ninja
-            cmake-extra: >
-              -DCMAKE_C_COMPILER=clang-cl
-              -DCMAKE_CXX_COMPILER=clang-cl
+        - os: ubuntu-22.04
+          cmake-args: -G Ninja -DCMAKE_BUILD_TYPE=Debug -DDISCORD=ON -DDISCORD_DYNAMIC=ON -DWEBSOCKETS=OFF -DPREFER_BUNDLED_LIBS=ON -DAUTOUPDATE=ON
+          cmake-init-env: >
+            CC=clang
+            CXX=clang++
+            CFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer"
+            CXXFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer"
+          package-file: "*-linux_x86_64.tar.xz"
+          fancy: true
 
-    env:
-      CARGO_HTTP_MULTIPLEXING: false
+        - os: macOS-latest
+          cmake-args: -G Ninja -DCMAKE_BUILD_TYPE=Debug -DDISCORD=ON -DWEBSOCKETS=OFF -DPREFER_BUNDLED_LIBS=ON -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_SYSTEM_IGNORE_PATH=/usr/lib -DCMAKE_FIND_FRAMEWORK=LAST
+          cmake-init-env: >
+            CC=clang
+            CXX=clang++
+            CFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer"
+            CXXFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer"
+          package-file: "*-macos.dmg"
+          fancy: false
+
+        - os: windows-latest
+          cmake-args: -A x64 -DCMAKE_BUILD_TYPE=Debug -DDISCORD=ON -DTOOLS=OFF -DAUTOUPDATE=ON
+          cmake-init-env: >
+            CC=clang
+            CXX=clang++
+            CFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer"
+            CXXFLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer"
+          package-file: "*-win64.zip"
+          fancy: false
 
     steps:
     - uses: actions/checkout@v4
@@ -40,74 +51,76 @@ jobs:
         submodules: true
 
     - name: Prepare Linux
-      if: runner.os == 'Linux'
+      if: contains(matrix.os, 'ubuntu')
       run: |
         sudo apt-get update -y
-        sudo apt-get install -y \
-          clang llvm \
-          cmake ninja-build pkg-config \
+        sudo apt-get install clang llvm pkg-config cmake ninja-build \
           libfreetype6-dev libnotify-dev libsdl2-dev libsqlite3-dev \
           libvulkan-dev glslang-tools spirv-tools \
           libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
-          libx264-dev libpng-dev libglew-dev
+          libx264-dev libpng-dev libasan6 valgrind gcovr libglew-dev -y
 
     - name: Prepare macOS
-      if: runner.os == 'macOS'
+      if: contains(matrix.os, 'macOS')
       run: |
         brew update || true
-        brew install pkg-config ninja molten-vk vulkan-headers \
-                     glslang spirv-tools glew libpng x264 || true
-        brew upgrade freetype || true
+        brew install llvm pkg-config ninja molten-vk vulkan-headers glslang spirv-tools glew googletest libpng x264 || true
+        brew upgrade freetype
+        pip3 install --break-system-packages dmgbuild
+        echo /Library/Frameworks/Python.framework/Versions/3.12/bin >> $GITHUB_PATH
+        echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
+        sudo rm -rf /Library/Developer/CommandLineTools
 
-    - name: Prepare Windows
-      if: runner.os == 'Windows'
-      shell: bash
-      run: |
-        choco install ninja llvm -y
-
-    - name: Setup Rust
+    - name: Add rust macOS
+      if: contains(matrix.os, 'macOS')
       run: |
         rustup default stable
         rustup update
+        rustup target add x86_64-apple-darwin aarch64-apple-darwin
 
-    - name: Cache Rust
+    - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
 
-    - name: Configure & Build (ASAN)
-      shell: bash
+    - name: Build in debug mode with ASAN
       env:
-        CC: ${{ matrix.cc }}
-        CXX: ${{ matrix.cxx }}
+        VERSION: ${{ secrets.VERSION }}
+        ASAN_OPTIONS: detect_leaks=1
+      shell: bash
       run: |
-        mkdir build
-        cd build
+        VERSION_FILE="$GITHUB_WORKSPACE/versioninfo.h"
+        printf '%s' "$VERSION" | base64 -d > "$VERSION_FILE"
 
-        if [[ "$RUNNER_OS" == "Windows" ]]; then
-          SAN_FLAGS="/fsanitize=address /Zi"
-          cmake .. \
-            -G "${{ matrix.generator }}" \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_C_FLAGS="${SAN_FLAGS}" \
-            -DCMAKE_CXX_FLAGS="${SAN_FLAGS}" \
-            -DDISCORD=ON \
-            -DWEBSOCKETS=OFF \
-            ${{ matrix.cmake-extra }}
+        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            export MSYS_ARG_CONV_EXCL="/FI"
+            POST_FLAGS="-DCMAKE_CXX_FLAGS=\"/FI$VERSION_FILE\""
+            ENVFLAGS=""
         else
-          SAN_FLAGS="-fsanitize=address,undefined -fsanitize-recover=all -fno-omit-frame-pointer"
-          cmake .. \
-            -G "${{ matrix.generator }}" \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_C_FLAGS="${SAN_FLAGS}" \
-            -DCMAKE_CXX_FLAGS="${SAN_FLAGS}" \
-            -DDISCORD=ON \
-            -DWEBSOCKETS=OFF \
-            ${{ matrix.cmake-extra }}
+            ENVFLAGS="CXXFLAGS=-include$VERSION_FILE"
+            POST_FLAGS=""
         fi
 
-        cmake --build . --target everything
+        if [[ "${{ matrix.os }}" == "macOS-latest" ]]; then
+            POST_FLAGS+=" -DPNG_LIBRARY=${GITHUB_WORKSPACE}/ddnet-libs/png/mac/libfat/libpng16.16.dylib"
+            POST_FLAGS+=" -DPNG_INCLUDEDIR=${GITHUB_WORKSPACE}/ddnet-libs/png/include"
+        fi
 
-    - name: Upload ASAN Build
+        mkdir release
+        cd release
+        cmake -E env ${{ matrix.cmake-init-env }} $ENVFLAGS \
+          cmake ${{ matrix.cmake-args }} $POST_FLAGS \
+          -DDOWNLOAD_GTEST=ON \
+          -DCMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG=. ..
+        cmake --build . --config Debug --target everything
+
+    - name: Package
+      run: |
+        cd release
+        cmake --build . --config Debug --target package_default
+        mkdir artifacts
+        mv ${{ matrix.package-file }} artifacts
+
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ddnet-debug-${{ runner.os }}
-        path: build
+        name: ddnet-${{ matrix.os }}-asan
+        path: release/artifacts
